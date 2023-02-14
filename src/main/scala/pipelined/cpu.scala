@@ -22,18 +22,27 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
 
   // Control signals used in EX stage
   class EXControl extends Bundle {
+    val controltransferop = UInt(2.W)
+    val aluop = UInt(3.W)
+    val op1_src = UInt(1.W)
+    val op2_src = UInt(2.W)
+    
   }
 
   // Control signals used in MEM stage
   class MControl extends Bundle {
+    val memop = UInt(2.W)
   }
 
   // Control signals used in WB stage
   class WBControl extends Bundle {
+    val writeback_valid = UInt(1.W)
+    val writeback_src = UInt(2.W) 
   }
 
   // Data of the the register between ID and EX stages
   class IDEXBundle extends Bundle {
+    
   }
 
   // Control block of the IDEX register
