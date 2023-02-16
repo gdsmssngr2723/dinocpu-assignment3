@@ -1,0 +1,31 @@
+
+*** These modified files were found in JOE when it aborted on Wed Feb 15 16:41:01 2023
+*** JOE was aborted by UNIX signal 1
+
+*** File '/home/bbooth/dinocpu-assignment3/.git/COMMIT_EDITMSG'
+Finished part 1 I think 
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# On branch main
+# Your branch is up to date with 'origin/main'.
+#
+# Changes to be committed:
+#	modified:   src/main/scala/components/alucontrol.scala
+#	modified:   src/main/scala/components/control.scala
+#	modified:   src/main/scala/components/controltransferunit.scala
+#	modified:   src/main/scala/pipelined/cpu.scala
+#
+
+*** File '(Unnamed)'
+/home/bbooth/DinoCpu2/.git/COMMIT_EDITMSG
+/home/bbooth/DinoCpu2/.git/COMMIT_EDITMSG
+/home/bbooth/DinoCpu2/.git/COMMIT_EDITMSG
+/home/bbooth/DinoCpu2/.git/COMMIT_EDITMSG
+/home/bbooth/dinocpu-assignment3/.git/COMMIT_EDITMSG
+
+*** File '* Startup Log *'
+Processing '/etc/joe/editorrc'...
+Processing '/etc/joe/ftyperc'...
+Finished processing /etc/joe/ftyperc
+Finished processing /etc/joe/editorrc

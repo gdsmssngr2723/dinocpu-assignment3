@@ -58,15 +58,50 @@ class Control extends Module {
     val validinst         = Output(UInt(1.W))
   })
 
-  val signals =
+   val signals =
+
     ListLookup(io.opcode,
+
       /*default*/           List(     0.U,               0.U,   0.U,     0.U,     0.U,             0.U,           0.U,       0.U),
+
       Array(              /*        aluop, controltransferop, memop, op1_src, op2_src, writeback_valid, writeback_src, validinst*/
+
       // R-format 64-bit operands
+
       BitPat("b0110011") -> List(     1.U,               0.U,   0.U,     0.U,     0.U,             1.U,           0.U,       1.U),
+
       // R-format 32-bit operands
+
       BitPat("b0111011") -> List(     3.U,               0.U,   0.U,     0.U,     0.U,             1.U,           0.U,       1.U),
+
+      // I-format 64-bit
+
+      BitPat("b0010011") -> List(     2.U,               0.U,   0.U,     0.U,     2.U,             1.U,           0.U,       1.U),
+
+      // I-format 32-bit
+
+      BitPat("b0011011") -> List(     4.U,               0.U,   0.U,     0.U,     2.U,             1.U,           0.U,       1.U),
+
+      // Load?
+
+      BitPat("b0000011") -> List(     5.U,               0.U,   1.U,     0.U,     2.U,             1.U,           2.U,       1.U),
+
+      BitPat("b0110111") -> List(     0.U,               0.U,   0.U,     0.U,     0.U,             1.U,           1.U,       1.U),
+
+      BitPat("b0010111") -> List(     5.U,               0.U,   0.U,     1.U,     2.U,             1.U,           0.U,       1.U),
+
+      BitPat("b0100011") -> List(     5.U,               0.U,   2.U,     0.U,     2.U,             0.U,          /*1.U*/ 0.U,       1.U),
+
+      BitPat("b1100011") -> List(     0.U,               3.U,   0.U,     0.U,     0.U,             0.U,           0.U,       1.U),
+
+      BitPat("b1101111") -> List(     5.U,               1.U,   0.U,     1.U,     1.U,             1.U,           0.U,       1.U),
+
+      BitPat("b1100111") -> List(     5.U,               2.U,   0.U,     1.U,     1.U,             1.U,           0.U,       1.U),
+
+      // I don't think there should be any difference between the 32 bit and the 64 bit I type in this table.
+
       ) // Array
+
     ) // ListLookup
 
   io.aluop             := signals(0)

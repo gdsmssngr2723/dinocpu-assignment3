@@ -16,59 +16,74 @@ import dinocpu.components._
 class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   // Everything in the register between IF and ID stages
   class IFIDBundle extends Bundle {
-    val instruction = UInt(32.W)
-    val pc          = UInt(64.W)
+    val instruction       = UInt(32.W)
+    val pc                = UInt(64.W)
   }
 
   // Control signals used in EX stage
   class EXControl extends Bundle {
     val controltransferop = UInt(2.W)
-    val aluop = UInt(3.W)
-    val op1_src = UInt(1.W)
-    val op2_src = UInt(2.W)
-    
+    val aluop             = UInt(3.W)
+    val op1_src           = UInt(1.W)
+    val op2_src           = UInt(2.W)    
   }
 
   // Control signals used in MEM stage
   class MControl extends Bundle {
-    val memop = UInt(2.W)
+    val memop             = UInt(2.W)
   }
 
   // Control signals used in WB stage
   class WBControl extends Bundle {
-    val writeback_valid = UInt(1.W)
-    val writeback_src = UInt(2.W) 
+    val writeback_valid   = UInt(1.W)
+    val writeback_src     = UInt(2.W) 
   }
 
   // Data of the the register between ID and EX stages
   class IDEXBundle extends Bundle {
-    
+    val imm           = UInt(64.W)
+    val readdata1         = UInt(64.W)
+    val readdata2         = UInt(64.W)
+    val instruction       = UInt(32.W)
+    val pc                = UInt(64.W)
   }
 
   // Control block of the IDEX register
   class IDEXControl extends Bundle {
-    val ex_ctrl  = new EXControl
-    val mem_ctrl = new MControl
-    val wb_ctrl  = new WBControl
+    val ex_ctrl           = new EXControl
+    val mem_ctrl          = new MControl
+    val wb_ctrl           = new WBControl
   }
 
   // Everything in the register between EX and MEM stages
   class EXMEMBundle extends Bundle {
+    val nextpc            = UInt(64.W)
+    val taken             = Bool()
+    val result            = UInt(64.W)
+    val readdata2         = UInt(64.W)
+    //val writeback1        = UInt(64.W)
+    //val writeback2        = UInt(64.W)
+    val instruction       = UInt(32.W)
+    val imm               = UInt(64.W)
   }
 
   // Control block of the EXMEM register
   class EXMEMControl extends Bundle {
-    val mem_ctrl  = new MControl
-    val wb_ctrl   = new WBControl
+    val mem_ctrl          = new MControl
+    val wb_ctrl           = new WBControl
   }
 
   // Everything in the register between MEM and WB stages
   class MEMWBBundle extends Bundle {
+    val result            = UInt(64.W)
+    val imm               = UInt(64.W)
+    val readdata      = UInt(64.W)
+    val instruction       = UInt(32.W)
   }
 
   // Control block of the MEMWB register
   class MEMWBControl extends Bundle {
-    val wb_ctrl = new WBControl
+    val wb_ctrl           = new WBControl
   }
 
   // All of the structures required
@@ -100,29 +115,29 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   val mem_wb_ctrl = Module(new StageReg(new MEMWBControl))
 
   // Remove when connected
-  control.io          := DontCare
-  registers.io        := DontCare
-  aluControl.io       := DontCare
-  alu.io              := DontCare
-  immGen.io           := DontCare
-  controlTransfer.io  := DontCare
-  pcPlusFour.io       := DontCare
+  // control.io          := DontCare
+  // registers.io        := DontCare
+  // aluControl.io       := DontCar
+  // alu.io              := DontCare
+  // immGen.io           := DontCare
+  // controlTransfer.io  := DontCare
+  // pcPlusFour.io       := DontCare
   forwarding.io       := DontCare
   hazard.io           := DontCare
 
-  io.dmem := DontCare
+  //io.dmem := DontCare
   dontTouch(pc)
 
-  id_ex.io       := DontCare
-  id_ex_ctrl.io  := DontCare
-  ex_mem.io      := DontCare
-  ex_mem_ctrl.io := DontCare
-  mem_wb.io      := DontCare
-  mem_wb_ctrl.io := DontCare
+  //id_ex.io       := DontCare
+  //id_ex_ctrl.io  := DontCare
+  //ex_mem.io      := DontCare
+  //ex_mem_ctrl.io := DontCare
+  //mem_wb.io      := DontCare
+  //mem_wb_ctrl.io := DontCare
 
   // From memory back to fetch. Since we don't decide whether to take a branch or not until the memory stage.
-  val next_pc = Wire(UInt(64.W))
-  next_pc := DontCare // Remove when connected
+  //val next_pc = Wire(UInt(64.W))
+  //next_pc := DontCare // Remove when connected
 
   /////////////////////////////////////////////////////////////////////////////
   // FETCH STAGE
@@ -144,6 +159,15 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   }
   if_id.io.in.pc := pc
 
+  pcPlusFour.io.inputx := pc
+  pcPlusFour.io.inputy := 4.U
+  
+  when(ex_mem.io.data.taken === true.B) {
+    pc := ex_mem.io.data.nextpc
+  } .otherwise {
+    pc := pcPlusFour.io.result
+  } 
+
   // Update during Part III when implementing branches/jump
   if_id.io.valid := true.B
   if_id.io.flush := false.B
@@ -154,6 +178,41 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   /////////////////////////////////////////////////////////////////////////////
 
   // Send opcode to control
+  control.io.opcode := if_id.io.data.instruction(6,0)
+  immGen.io.instruction := if_id.io.data.instruction
+  registers.io.readreg1 := if_id.io.data.instruction(19,15)
+  registers.io.readreg2 := if_id.io.data.instruction(24,20)
+  registers.io.writereg := mem_wb.io.data.instruction(11,7)
+
+  when(mem_wb.io.data.instruction(11,7) === 0.U) {
+    registers.io.wen := 0.U
+  } .otherwise {
+    registers.io.wen := mem_wb_ctrl.io.data.wb_ctrl.writeback_valid
+  }
+
+  registers.io.writedata := 0.U
+
+  switch(mem_wb_ctrl.io.data.wb_ctrl.writeback_src) {
+    is(0.U) { registers.io.writedata := mem_wb.io.data.result }
+    is(1.U) { registers.io.writedata := mem_wb.io.data.imm }
+    is(2.U) { registers.io.writedata := mem_wb.io.data.readdata }
+  }
+  
+  id_ex_ctrl.io.in.ex_ctrl.controltransferop := control.io.controltransferop
+  id_ex_ctrl.io.in.ex_ctrl.aluop := control.io.aluop
+  id_ex_ctrl.io.in.ex_ctrl.op1_src := control.io.op1_src
+  id_ex_ctrl.io.in.ex_ctrl.op2_src := control.io.op2_src
+  
+  id_ex_ctrl.io.in.mem_ctrl.memop := control.io.memop
+
+  id_ex_ctrl.io.in.wb_ctrl.writeback_src := control.io.writeback_src
+  id_ex_ctrl.io.in.wb_ctrl.writeback_valid := control.io.writeback_valid
+
+  id_ex.io.in.imm := immGen.io.sextImm
+  id_ex.io.in.readdata1 := registers.io.readdata1
+  id_ex.io.in.readdata2 := registers.io.readdata2
+  id_ex.io.in.instruction := if_id.io.data.instruction
+  id_ex.io.in.pc := if_id.io.data.pc
 
   // Grab rs1 and rs2 from the instruction in this stage
 
@@ -179,6 +238,43 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   /////////////////////////////////////////////////////////////////////////////
   // EX STAGE
   /////////////////////////////////////////////////////////////////////////////
+
+  controlTransfer.io.controltransferop := id_ex_ctrl.io.data.ex_ctrl.controltransferop
+  controlTransfer.io.pc := id_ex.io.data.pc
+  controlTransfer.io.funct3 := id_ex.io.data.instruction(14,12)
+  controlTransfer.io.operand1 := id_ex.io.data.readdata1
+  controlTransfer.io.operand2 := id_ex.io.data.readdata2
+  controlTransfer.io.imm := id_ex.io.data.imm
+  
+  aluControl.io.aluop := id_ex_ctrl.io.data.ex_ctrl.aluop
+  aluControl.io.funct3 := id_ex.io.data.instruction(14,12)
+  aluControl.io.funct7 := id_ex.io.data.instruction(31,25)
+
+  alu.io.operation := aluControl.io.operation
+  alu.io.operand1 := 0.U
+  alu.io.operand2 := 0.U
+  switch(id_ex_ctrl.io.data.ex_ctrl.op1_src) {
+    is(0.U) { alu.io.operand1 := id_ex.io.data.readdata1 }
+    is(1.U) { alu.io.operand1 := id_ex.io.data.pc }
+  }
+
+  switch(id_ex_ctrl.io.data.ex_ctrl.op2_src) {
+    is(0.U) { alu.io.operand2 := id_ex.io.data.readdata2 }
+    is(1.U) { alu.io.operand2 := 4.U }
+    is(2.U) { alu.io.operand2 := id_ex.io.data.imm }
+  }
+
+  ex_mem_ctrl.io.in.mem_ctrl.memop := id_ex_ctrl.io.data.mem_ctrl.memop
+
+  ex_mem_ctrl.io.in.wb_ctrl.writeback_src := id_ex_ctrl.io.data.wb_ctrl.writeback_src
+  ex_mem_ctrl.io.in.wb_ctrl.writeback_valid := id_ex_ctrl.io.data.wb_ctrl.writeback_valid
+
+  ex_mem.io.in.nextpc := controlTransfer.io.nextpc
+  ex_mem.io.in.taken := controlTransfer.io.taken
+  ex_mem.io.in.result := alu.io.result
+  ex_mem.io.in.readdata2 := id_ex.io.data.readdata2
+  ex_mem.io.in.imm := id_ex.io.data.imm
+  ex_mem.io.in.instruction := id_ex.io.data.instruction
 
   // (Skip for Part I) Set the inputs to the hazard detection unit from this stage
 
@@ -219,6 +315,27 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   /////////////////////////////////////////////////////////////////////////////
   // MEM STAGE
   /////////////////////////////////////////////////////////////////////////////
+
+  io.dmem.address := ex_mem.io.data.result
+  io.dmem.memread := ex_mem_ctrl.io.data.mem_ctrl.memop(0)
+  io.dmem.memwrite := ex_mem_ctrl.io.data.mem_ctrl.memop(1)
+  io.dmem.valid := false.B
+  when(ex_mem_ctrl.io.data.mem_ctrl.memop === 1.U || ex_mem_ctrl.io.data.mem_ctrl.memop === 2.U) {
+    io.dmem.valid := true.B
+  }
+  //mem_wb.io.in.instruction := ex_mem.io.data.instruction
+  io.dmem.maskmode := ex_mem.io.data.instruction(13,12)
+  io.dmem.sext := !ex_mem.io.data.instruction(14)
+  io.dmem.writedata := ex_mem.io.data.readdata2
+
+  dontTouch(mem_wb.io)
+  mem_wb_ctrl.io.in.wb_ctrl.writeback_src := ex_mem_ctrl.io.data.wb_ctrl.writeback_src
+  mem_wb_ctrl.io.in.wb_ctrl.writeback_valid := ex_mem_ctrl.io.data.wb_ctrl.writeback_valid
+  mem_wb.io.in.result := ex_mem.io.data.result
+  mem_wb.io.in.imm := ex_mem.io.data.imm
+  mem_wb.io.in.readdata := io.dmem.readdata
+  mem_wb.io.in.instruction := ex_mem.io.data.instruction
+  
 
   // Set data memory IO
 
