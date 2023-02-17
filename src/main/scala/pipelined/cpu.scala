@@ -114,6 +114,9 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   // registers, we create an anonymous Bundle
   val mem_wb_ctrl = Module(new StageReg(new MEMWBControl))
 
+  val writeback = Wire(UInt(64.W))
+  writeback := 0.U
+
   // Remove when connected
   // control.io          := DontCare
   // registers.io        := DontCare
@@ -122,7 +125,7 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   // immGen.io           := DontCare
   // controlTransfer.io  := DontCare
   // pcPlusFour.io       := DontCare
-  forwarding.io       := DontCare
+  //forwarding.io       := DontCare
   hazard.io           := DontCare
 
   //io.dmem := DontCare
@@ -162,15 +165,25 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   pcPlusFour.io.inputx := pc
   pcPlusFour.io.inputy := 4.U
   
-  when(ex_mem.io.data.taken === true.B) {
-    pc := ex_mem.io.data.nextpc
-  } .otherwise {
-    pc := pcPlusFour.io.result
-  } 
+  switch(hazard.io.pcstall) {
+    is(0.U) {
+      switch(hazard.io.pcfromtaken) {
+        is(0.U) {
+          pc := pcPlusFour.io.result
+        }
+        is(1.U) {
+          pc := ex_mem.io.data.nextpc
+        }
+      }
+    }
+    is(1.U) {
+      pc := pc
+    }
+  }
 
   // Update during Part III when implementing branches/jump
-  if_id.io.valid := true.B
-  if_id.io.flush := false.B
+  if_id.io.valid := hazard.io.if_id_stall
+  if_id.io.flush := hazard.io.if_id_flush
 
 
   /////////////////////////////////////////////////////////////////////////////
@@ -190,13 +203,7 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
     registers.io.wen := mem_wb_ctrl.io.data.wb_ctrl.writeback_valid
   }
 
-  registers.io.writedata := 0.U
-
-  switch(mem_wb_ctrl.io.data.wb_ctrl.writeback_src) {
-    is(0.U) { registers.io.writedata := mem_wb.io.data.result }
-    is(1.U) { registers.io.writedata := mem_wb.io.data.imm }
-    is(2.U) { registers.io.writedata := mem_wb.io.data.readdata }
-  }
+  registers.io.writedata := writeback
   
   id_ex_ctrl.io.in.ex_ctrl.controltransferop := control.io.controltransferop
   id_ex_ctrl.io.in.ex_ctrl.aluop := control.io.aluop
@@ -218,6 +225,9 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
 
   // (Part III and/or Part IV) Send inputs from this stage to the hazard detection unit
 
+  hazard.io.rs1 := if_id.io.data.instruction(19,15)
+  hazard.io.rs2 := if_id.io.data.instruction(24,20)
+
   // Send rs1 and rs2 to the register file
 
   // Send the instruction to the immediate generator
@@ -230,36 +240,86 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
 
   // (Part III and/or Part IV) Set the control signals on the ID_EX pipeline register
   id_ex.io.valid := true.B
-  id_ex.io.flush := false.B
+  id_ex.io.flush := hazard.io.id_ex_flush
   id_ex_ctrl.io.valid := true.B
-  id_ex_ctrl.io.flush := false.B
+  id_ex_ctrl.io.flush := hazard.io.id_ex_flush
 
 
   /////////////////////////////////////////////////////////////////////////////
   // EX STAGE
   /////////////////////////////////////////////////////////////////////////////
+  val maybeOperand1 = Wire(UInt(64.W))
+  val maybeOperand2 = Wire(UInt(64.W))
+  maybeOperand1 := 0.U
+  maybeOperand2 := 0.U
 
   controlTransfer.io.controltransferop := id_ex_ctrl.io.data.ex_ctrl.controltransferop
   controlTransfer.io.pc := id_ex.io.data.pc
   controlTransfer.io.funct3 := id_ex.io.data.instruction(14,12)
-  controlTransfer.io.operand1 := id_ex.io.data.readdata1
-  controlTransfer.io.operand2 := id_ex.io.data.readdata2
+  controlTransfer.io.operand1 := maybeOperand1
+  controlTransfer.io.operand2 := maybeOperand2
   controlTransfer.io.imm := id_ex.io.data.imm
   
   aluControl.io.aluop := id_ex_ctrl.io.data.ex_ctrl.aluop
   aluControl.io.funct3 := id_ex.io.data.instruction(14,12)
   aluControl.io.funct7 := id_ex.io.data.instruction(31,25)
 
+  forwarding.io.rs1 := id_ex.io.data.instruction(19,15)
+  forwarding.io.rs2 := id_ex.io.data.instruction(24,20)
+  forwarding.io.exmemrd := ex_mem.io.data.instruction(11,7)
+  forwarding.io.exmemrw := ex_mem_ctrl.io.data.wb_ctrl.writeback_valid
+  forwarding.io.memwbrd := mem_wb.io.data.instruction(11,7)
+  forwarding.io.memwbrw := mem_wb_ctrl.io.data.wb_ctrl.writeback_valid
   alu.io.operation := aluControl.io.operation
   alu.io.operand1 := 0.U
   alu.io.operand2 := 0.U
   switch(id_ex_ctrl.io.data.ex_ctrl.op1_src) {
-    is(0.U) { alu.io.operand1 := id_ex.io.data.readdata1 }
+    is(0.U) { 
+        switch(forwarding.io.forwardA) {
+          is(0.U) {
+            maybeOperand1 := id_ex.io.data.readdata1
+          }
+          is(1.U) {
+            switch(ex_mem_ctrl.io.data.wb_ctrl.writeback_src) {
+              is(0.U) {
+                maybeOperand1 := ex_mem.io.data.result
+              }
+              is(1.U) {
+                maybeOperand1 := ex_mem.io.data.imm
+              }
+            }
+          }
+          is(2.U) {
+              maybeOperand1 := writeback
+          }
+        }
+        alu.io.operand1 := maybeOperand1
+    }
     is(1.U) { alu.io.operand1 := id_ex.io.data.pc }
   }
 
   switch(id_ex_ctrl.io.data.ex_ctrl.op2_src) {
-    is(0.U) { alu.io.operand2 := id_ex.io.data.readdata2 }
+    is(0.U) { 
+      switch(forwarding.io.forwardB) {
+        is(0.U) {
+          maybeOperand2 := id_ex.io.data.readdata2
+        }
+        is(1.U) {
+            switch(ex_mem_ctrl.io.data.wb_ctrl.writeback_src) {
+              is(0.U) {
+                maybeOperand2 := ex_mem.io.data.result
+              }
+              is(1.U) {
+                maybeOperand2 := ex_mem.io.data.imm
+              }
+            }
+        }
+        is(2.U) {
+          maybeOperand2 := writeback
+        }
+      }
+      alu.io.operand2 := maybeOperand2 
+    }
     is(1.U) { alu.io.operand2 := 4.U }
     is(2.U) { alu.io.operand2 := id_ex.io.data.imm }
   }
@@ -272,12 +332,12 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   ex_mem.io.in.nextpc := controlTransfer.io.nextpc
   ex_mem.io.in.taken := controlTransfer.io.taken
   ex_mem.io.in.result := alu.io.result
-  ex_mem.io.in.readdata2 := id_ex.io.data.readdata2
+  ex_mem.io.in.readdata2 := maybeOperand2
   ex_mem.io.in.imm := id_ex.io.data.imm
   ex_mem.io.in.instruction := id_ex.io.data.instruction
 
   // (Skip for Part I) Set the inputs to the hazard detection unit from this stage
-
+  hazard.io.idex_rd := id_ex.io.data.instruction(11,7)
   // (Skip for Part I) Set the inputs to the forwarding unit from this stage
 
   // Connect the ALU Control wires
@@ -308,7 +368,7 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
 
   // (Part III and/or Part IV) Set the control signals on the EX_MEM pipeline register
   ex_mem.io.valid      := true.B
-  ex_mem.io.flush      := false.B
+  ex_mem.io.flush      := hazard.io.ex_mem_flush
   ex_mem_ctrl.io.valid := true.B
   ex_mem_ctrl.io.flush := false.B
 
@@ -342,7 +402,7 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   // Send next_pc back to the Fetch stage
 
   // (Skip for Part I) Send input signals to the hazard detection unit
-
+  hazard.io.exmem_taken := ex_mem.io.data.taken
   // (Skip for Part I) Send input signals to the forwarding unit
 
   // Sending signals from this stage to the WB stage
@@ -359,7 +419,12 @@ class PipelinedCPU(implicit val conf: CPUConfig) extends BaseCPU {
   /////////////////////////////////////////////////////////////////////////////
   // WB STAGE
   /////////////////////////////////////////////////////////////////////////////
-
+  
+  switch(mem_wb_ctrl.io.data.wb_ctrl.writeback_src) {
+    is(0.U) { writeback := mem_wb.io.data.result }
+    is(1.U) { writeback := mem_wb.io.data.imm }
+    is(2.U) { writeback := mem_wb.io.data.readdata }
+  }
   // Set the register to be written to
 
   // Set the writeback data mux
